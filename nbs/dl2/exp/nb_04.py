@@ -7,8 +7,9 @@
 from exp.nb_03 import *
 
 class DataBunch():
-    def __init__(self, trainingDataLoader, validationDataLoader):
+    def __init__(self, trainingDataLoader, validationDataLoader, numberOfClasses):
         self.trainingDataLoader, self.validationDataLoader = trainingDataLoader, validationDataLoader
+        self.numberOfClasses = numberOfClasses
 
     @property
     def trainingDataSet(self): return self.trainingDataLoader
