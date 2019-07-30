@@ -22,6 +22,118 @@ class LambdaLayer(torch.nn.Module):
 
 def flattenImage(imageMatrix): return imageMatrix.view(imageMatrix.shape[0], -1)
 
+def resizeImage(imageVector): return imageVector.view(-1, 1, 28, 28)
+
+class TeacherWithHooks():
+
+
+    def __init__(self,
+                 lossFunction=Functional.cross_entropy,
+                 accuracyFunction=accuracy,
+                 schedulingFunctions=[cosineScheduler(1e-1,1e-6), cosineScheduler(1e-1,1e-6)]
+                ):
+        self.lossFunction = lossFunction
+        self.accuracyFunction = accuracyFunction
+        self.schedulingFunctions = schedulingFunctions
+        self._initStorage()
+
+    def _initStorage(self):
+        self.learningRates, self.losses = [],[]
+        self.registeredHooks = []
+
+    def teachModel(self, cnnModel, dataBunch, numberOfEpochs):
+        self.optimizer = optim.SGD(cnnModel.parameters(), self.schedulingFunctions[0](0))
+        self.numberOfEpochs = numberOfEpochs
+        self.modelsMeans = [[] for _ in cnnModel]
+        self.convolutionModel = cnnModel
+        self.modelsStandardDeviations = [[] for _ in cnnModel]
+        self._beginTraining()
+        for epoch in range(numberOfEpochs):
+            self.epoch = epoch
+            trainingLoss, trainingAccuracy = self._trainModel(cnnModel, dataBunch.trainingDataLoader)
+            print("Epoch #{} Training: Loss {} Accuracy {}".format(epoch, trainingLoss, trainingAccuracy))
+
+            validationLoss, validationAccuracy = self._validateModel(cnnModel, dataBunch.validationDataLoader)
+            print("Epoch #{} Validation: Loss {} Accuracy {}".format(epoch, validationLoss, validationAccuracy))
+            print("")
+
+    def plotLearningRates  (self): plotter.plot(self.learningRates)
+
+    def plotLosses(self): plotter.plot(self.losses)
+
+    def plotMeans(self):
+        for layerOutputMeans in self.modelsMeans: plotter.plot(layerOutputMeans[:200])
+        plotter.legend(range(len(self.modelsMeans)))
+
+    def plotStandardDeviations(self):
+        for layerOutputSD in self.modelsStandardDeviations: plotter.plot(layerOutputSD[:200])
+        plotter.legend(range(len(self.modelsStandardDeviations)))
+
+    def _beginTraining(self):
+        self._initStorage()
+
+    def _addStats(self, index, model, inputParameters, outputParameters):
+        self.modelsMeans[index].append(outputParameters.data.mean())
+        self.modelsStandardDeviations[index].append(outputParameters.data.std())
+
+    def _registerHooks(self):
+        for index, modelLayer in enumerate(self.convolutionModel):
+            self.registeredHooks.append(modelLayer.register_forward_hook(partial(self._addStats, index)))
+
+    def _unregisterHooks(self):
+        for registeredHooks in self.registeredHooks: registeredHooks.remove()
+        self.registeredHooks = []
+
+    def _anealLearningRate(self):
+        for parameterGroup, schedulingFunction in zip(self.optimizer.param_groups,self.schedulingFunctions):
+            scheduledLearningRate = schedulingFunction(self.epoch/self.numberOfEpochs)
+            parameterGroup['lr'] = scheduledLearningRate
+
+    def _trainModel(self, cnnModel, trainingDataSet):
+        def _teachModel(loss):
+            loss.backward()
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+            #capture metrics
+            self.learningRates.append(self.optimizer.param_groups[-1]['lr'])
+            self.losses.append(loss.detach().cpu())
+
+        returnItems = self._proccessDataSet(cnnModel,
+                                            trainingDataSet,
+                                            preEpoch=self._registerHooks,
+                                            preEvaluation=self._anealLearningRate,
+                                            postEpoch=self._unregisterHooks,
+                                            postEvaluation=_teachModel
+                                           )
+        return returnItems
+
+    def _validateModel(self, cnnModel, validationDataSet):
+        with torch.no_grad():
+            returnItems = self._proccessDataSet(cnnModel, validationDataSet)
+        return returnItems
+
+    def _proccessDataSet(self,
+                         cnnModel,
+                         dataLoader,
+                         preEpoch=lambda: None,
+                         preEvaluation=lambda: None,
+                         postEvaluation=lambda loss: None,
+                         postEpoch=lambda: None
+                        ):
+        accumulatedLoss, accumulatedAccuracy = 0.,0.
+        preEpoch()
+        for _xDataSet, _yDataSet in dataLoader:
+            preEvaluation()
+            _predictions = cnnModel(_xDataSet)
+            loss = self.lossFunction(_predictions, _yDataSet)
+            postEvaluation(loss)
+            accumulatedLoss+= loss
+            accumulatedAccuracy += self.accuracyFunction(_predictions, _yDataSet)
+        postEpoch()
+        numberOfBatches = len(dataLoader)
+        return accumulatedLoss/numberOfBatches, accumulatedAccuracy/numberOfBatches
+
 class GeneralRectifiedLinearUnit(torch.nn.Module):
     def __init__(self, leaky=None, subtractValue=0, maxToClamp=math.inf):
         super().__init__()
@@ -33,14 +145,14 @@ class GeneralRectifiedLinearUnit(torch.nn.Module):
                 if self.leaky is not None \
                 else Functional.relu(inputVector)
         if self.subtractValue > 0: rectifiedVector.sub_(self.subtractValue)
-        if self.maxToClamp is not math.inf: rectifiedVector.clamp_max_(self.maxtToClamp)
+        if self.maxToClamp is not math.inf: rectifiedVector.clamp_max_(self.maxToClamp)
         return rectifiedVector
 
 
 layerSizes = [8, 16, 32, 32]
 
-def createBetterConvolutionModel(numberOfClasses):
-    return torch.nn.Sequential(*createBetterConvolutionLayers(numberOfClasses, layerSizes)).cuda()
+def createBetterConvolutionModel(numberOfClasses, layerSizes):
+    return torch.nn.Sequential(*createBetterConvolutionLayers(numberOfClasses, layerSizes))
 
 def createBetterConvolutionalLayer(inputSize,
                                    outputSize,
@@ -62,7 +174,7 @@ def createBetterConvolutionalLayer(inputSize,
 
 def createBetterConvolutionLayers(numberOfClasses, layerSizes):
     adjustedLayerSizes = [1]  + layerSizes # Make the first layer take a dimension of one
-    convolutionLayers = [createConvolutionLayer(adjustedLayerSizes[i],
+    convolutionLayers = [createBetterConvolutionalLayer(adjustedLayerSizes[i],
                                                adjustedLayerSizes[i+1],
                                                5 if i == 0 else 3)
                         for i in range(len(adjustedLayerSizes) - 1)]
@@ -72,3 +184,15 @@ def createBetterConvolutionLayers(numberOfClasses, layerSizes):
         torch.nn.Linear(layerSizes[-1], numberOfClasses)
     ]
     return [LambdaLayer(resizeImage)] + convolutionLayers + finishingLayers
+
+from IPython.display import display, Javascript
+def exportNotebook():
+    display(Javascript("""{
+const ip = IPython.notebook
+if (ip) {
+    ip.save_notebook()
+    console.log('a')
+    const s = `!python notebook2script.py ${ip.notebook_name}`
+    if (ip.kernel) { ip.kernel.execute(s) }
+}
+}"""))
