@@ -14,28 +14,46 @@ class Subscriber:
     def preEpoch(self, epoch):
         print('pre epoch')
 
-
-    def preModelTeach(self):
+    def preModelTeach(self, model, epochs):
         print('pre model teach')
 
     def postModelTeach(self):
         print('post model taught')
 
+class TrainingSubscriber(Subscriber):
+
+    def __init__(self):
+        print('Training subscriber init')
+
+    def postEpoch(self, epochNumber):
+        print('training post epoch')
+
+    def preBatchEvaluation(self):
+        print('training pre evaluation')
+
+
+class ValidationSubscriber(Subscriber):
+
+    def __init__(self):
+        print('Validation subscriber init')
+
+    def postEpoch(self, epochNumber):
+        print('Validation post epoch')
+
 
 class TeacherEnhanced:
-
     def __init__(self,
                  dataBunch,
                  lossFunction,
-                 trainingSubscriber: Subscriber,
-                 validationSubscriber: Subscriber):
+                 trainingSubscriber: TrainingSubscriber,
+                 validationSubscriber: ValidationSubscriber):
         self._dataBunch = dataBunch
         self._lossFunction = lossFunction
         self._trainingSubscriber = trainingSubscriber
         self._validationSubscriber = validationSubscriber
 
     def teachModel(self, model, numberOfEpochs):
-        self._notifiyPreTeach()
+        self._notifiyPreTeach(model, numberOfEpochs)
         for epoch in range(numberOfEpochs):
             self._trainModel(model,
                              epoch)
@@ -43,9 +61,9 @@ class TeacherEnhanced:
                                 epoch)
         self._notifiyPostTaught()
 
-    def _notifiyPreTeach(self):
-        self._trainingSubscriber.preModelTeach()
-        self._validationSubscriber.preModelTeach()
+    def _notifiyPreTeach(self, model, epochs):
+        self._trainingSubscriber.preModelTeach(model, epochs)
+        self._validationSubscriber.preModelTeach(model, epochs)
 
     def _notifiyPostTaught(self):
         self._trainingSubscriber.postModelTeach()
@@ -55,7 +73,7 @@ class TeacherEnhanced:
         self._processData(model,
                           self._dataBunch.trainingData,
                           epoch,
-                          self._trainingSubscriber.dataProcessingEvents)
+                          self._trainingSubscriber)
 
     def _validateModel(self, model, epoch):
         with torch.no_grad():
