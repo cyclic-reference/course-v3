@@ -1,44 +1,57 @@
 class Subscriber:
     def __init__(self):
-        print('finna bust a nut')
+        pass
 
     def postEpoch(self, epochNumber):
-        print('post epoch')
+        pass
 
     def postBatchEvaluation(self, loss):
-        print('post batch eval')
+        pass
 
     def preBatchEvaluation(self):
-        print('I\'m gonna pre')
+        pass
 
     def preEpoch(self, epoch):
-        print('pre epoch')
+        pass
 
     def preModelTeach(self, model, epochs):
-        print('pre model teach')
+        pass
 
     def postModelTeach(self):
-        print('post model taught')
+        pass
 
 class TrainingSubscriber(Subscriber):
 
-    def __init__(self):
+    def __init__(self,
+                 schedulingFunctions=[cosineScheduler(1e-1, 1e-6), cosineScheduler(1e-1, 1e-6)]):
         print('Training subscriber init')
+        self._optimizer = None
+        self._totalEpochs = 0
+        self._schedulingFunctions = schedulingFunctions
 
     def postEpoch(self, epochNumber):
-        print('training post epoch')
+        pass
+
+    def preModelTeach(self, model, epochs):
+        self._optimizer = optim.SGD(model.parameters(), self._schedulingFunctions[0](0))
+        self._totalEpochs = epochs
+
+    def postBatchEvaluation(self, loss):
+        loss.backward()
+        self._optimizer.step()
+        self._optimizer.zero_grad()
 
     def preBatchEvaluation(self):
-        print('training pre evaluation')
+        pass
 
 
 class ValidationSubscriber(Subscriber):
 
     def __init__(self):
-        print('Validation subscriber init')
+        pass
 
     def postEpoch(self, epochNumber):
-        print('Validation post epoch')
+        pass
 
 
 class TeacherEnhanced:
@@ -71,14 +84,14 @@ class TeacherEnhanced:
 
     def _trainModel(self, model, epoch):
         self._processData(model,
-                          self._dataBunch.trainingData,
+                          self._dataBunch.trainingDataSet,
                           epoch,
                           self._trainingSubscriber)
 
     def _validateModel(self, model, epoch):
         with torch.no_grad():
             self._processData(model,
-                              self._dataBunch.validationData,
+                              self._dataBunch.validationDataSet,
                               epoch,
                               self._validationSubscriber)
 
