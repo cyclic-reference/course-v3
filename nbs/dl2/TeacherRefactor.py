@@ -1,6 +1,7 @@
 class Subscriber:
     def __init__(self):
-        pass
+        self._totalEpochs = 0
+        self._currentEpoch = 0
 
     def postEpoch(self, epochNumber):
         pass
@@ -12,9 +13,11 @@ class Subscriber:
         pass
 
     def preEpoch(self, epoch):
+        self._currentEpoch = epoch
         pass
 
     def preModelTeach(self, model, epochs):
+        self._totalEpochs = epochs
         pass
 
     def postModelTeach(self):
@@ -24,25 +27,32 @@ class TrainingSubscriber(Subscriber):
 
     def __init__(self,
                  schedulingFunctions=[cosineScheduler(1e-1, 1e-6), cosineScheduler(1e-1, 1e-6)]):
-        print('Training subscriber init')
+        super().__init__()
         self._optimizer = None
-        self._totalEpochs = 0
         self._schedulingFunctions = schedulingFunctions
 
     def postEpoch(self, epochNumber):
         pass
 
     def preModelTeach(self, model, epochs):
+        super().preModelTeach(model, epochs)
         self._optimizer = optim.SGD(model.parameters(), self._schedulingFunctions[0](0))
         self._totalEpochs = epochs
 
     def postBatchEvaluation(self, loss):
+        self._teachModel(loss)
+
+    def _teachModel(self, loss):
         loss.backward()
         self._optimizer.step()
         self._optimizer.zero_grad()
 
     def preBatchEvaluation(self):
-        pass
+        self._annealLearningRate()
+
+    def _annealLearningRate(self):
+        for parameterGroup, schedulingFunction in zip(self._optimizer.param_groups, self._schedulingFunctions):
+            parameterGroup['lr'] = schedulingFunction(self._currentEpoch / self._totalEpochs)
 
 
 class ValidationSubscriber(Subscriber):
