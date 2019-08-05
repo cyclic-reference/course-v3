@@ -56,8 +56,8 @@ class StatisticsSubscriber(Subscriber):
                                                          self._epochAccuracy / self._numberOfBatches))
 
 
-class ModelHook:
-    def __init__(self, model, callback) -> None:
+class ModelLayerHook:
+    def __init__(self, model, callback=lambda *args: None) -> None:
         super().__init__()
         self._registeredHook = model.register_forward_hook(callback)
 
@@ -66,28 +66,45 @@ class ModelHook:
     def __del__(self): self.remove()
 
 
+class StatsHook:
+    def __init__(self, model) -> None:
+        super().__init__()
+        self._initializeStorage()
+        self._modelLayerHook = ModelLayerHook(model, self._appendStats)
+
+    def remove(self): self._modelLayerHook.remove()
+
+    def __del__(self): self.remove()
+
+    def _initializeStorage(self):
+        self.aggregatedStandardDeviations = []
+        self.aggregatedMeans = []
+
+    def _appendStats(self, module, input, output):
+        self.aggregatedMeans.append(output.data.mean())
+        self.aggregatedStandardDeviations.append(output.data.std())
+
+
 class HookedSubscriber(Subscriber):
     def __init__(self):
         super().__init__()
-        self._initializeStorage()
-        self._modelHook = None
-
-    def _initializeStorage(self):
-        self._aggregatedStandardDeviations = []
-        self._aggregatedMeans = []
+        self._statsHooks = []
 
     def preModelTeach(self, model, epochs):
         super().preModelTeach(model, epochs)
-        self._initializeStorage()
-        self._modelHook = ModelHook(model, self._appendStats)
+        self._statsHooks = [StatsHook(layer) for layer in model]
 
-    def _appendStats(self, module, input, output):
-        self._aggregatedMeans.append(output.data.mean())
-        self._aggregatedStandardDeviations.append(output.data.std())
 
     def postModelTeach(self):
         super().postModelTeach()
-        del self._modelHook
+
+    def plotMeansAndStandardDeviations(self):
+        fig, (ax0, ax1) = plotter.subplots(1, 2, figsize=(10, 4))
+        for statsHook in self._statsHooks:
+            layerMeans, layerStandarDeviations = statsHook.aggregatedMeans, statsHook.aggregatedStandardDeviations
+            ax0.plot(layerMeans)
+            ax1.plot(layerStandarDeviations)
+        plotter.legend(range(len(self._statsHooks)))
 
 
 class TrainingSubscriber(StatisticsSubscriber, HookedSubscriber):
