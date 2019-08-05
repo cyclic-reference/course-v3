@@ -6,13 +6,13 @@ class Subscriber:
     def postEpoch(self, epochNumber):
         pass
 
-    def postBatchEvaluation(self, loss):
+    def postBatchEvaluation(self, predictions, validationData):
         pass
 
     def preBatchEvaluation(self):
         pass
 
-    def preEpoch(self, epoch):
+    def preEpoch(self, epoch, dataLoader):
         self._currentEpoch = epoch
         pass
 
@@ -23,24 +23,58 @@ class Subscriber:
     def postModelTeach(self):
         pass
 
-class TrainingSubscriber(Subscriber):
+
+class StatisticsSubscriber(Subscriber):
 
     def __init__(self,
-                 schedulingFunctions=[cosineScheduler(1e-1, 1e-6), cosineScheduler(1e-1, 1e-6)]):
+                 accuracyFunction=accuracy,
+                 name="Steve"):
         super().__init__()
-        self._optimizer = None
-        self._schedulingFunctions = schedulingFunctions
+        self._epochAccuracy = 0.
+        self._epochLoss = 0.
+        self._numberOfBatches = 0
+        self._accuracyFunction = accuracyFunction
+        self._name = name
+
+    def preEpoch(self, epoch, dataLoader):
+        super().preEpoch(epoch, dataLoader)
+        self._numberOfBatches = len(dataLoader)
+
+    def postBatchEvaluation(self, predictions, validationData):
+        super().postBatchEvaluation(predictions, validationData)
+        self._epochAccuracy += self._accuracyFunction(predictions, validationData)
+
+    def postBatchLossConsumption(self, loss):
+        self._epochLoss += loss
 
     def postEpoch(self, epochNumber):
-        pass
+        super().postEpoch(epochNumber)
+        print("Epoch #{} {}: Loss {} Accuracy {}".format(epochNumber,
+                                                         self._name,
+                                                         self._epochLoss / self._numberOfBatches,
+                                                         self._epochAccuracy / self._numberOfBatches))
+
+
+class TrainingSubscriber(StatisticsSubscriber):
+
+    def __init__(self,
+                 lossFunction=Functional.cross_entropy,
+                 schedulingFunctions=[cosineScheduler(1e-1, 1e-6), cosineScheduler(1e-1, 1e-6)], ):
+        super().__init__(name="Training")
+        self._optimizer = None
+        self._schedulingFunctions = schedulingFunctions
+        self._lossFunction = lossFunction
 
     def preModelTeach(self, model, epochs):
         super().preModelTeach(model, epochs)
         self._optimizer = optim.SGD(model.parameters(), self._schedulingFunctions[0](0))
         self._totalEpochs = epochs
 
-    def postBatchEvaluation(self, loss):
-        self._teachModel(loss)
+    def postBatchEvaluation(self, predictions, valdationData):
+        super().postBatchEvaluation(predictions, valdationData)
+        calculatedLoss = self._lossFunction(predictions, valdationData)
+        self._teachModel(calculatedLoss)
+        self.postBatchLossConsumption(calculatedLoss)
 
     def _teachModel(self, loss):
         loss.backward()
@@ -48,6 +82,7 @@ class TrainingSubscriber(Subscriber):
         self._optimizer.zero_grad()
 
     def preBatchEvaluation(self):
+        super().preBatchEvaluation()
         self._annealLearningRate()
 
     def _annealLearningRate(self):
@@ -55,23 +90,18 @@ class TrainingSubscriber(Subscriber):
             parameterGroup['lr'] = schedulingFunction(self._currentEpoch / self._totalEpochs)
 
 
-class ValidationSubscriber(Subscriber):
+class ValidationSubscriber(StatisticsSubscriber):
 
     def __init__(self):
-        pass
-
-    def postEpoch(self, epochNumber):
-        pass
+        super().__init__(name="Validation")
 
 
 class TeacherEnhanced:
     def __init__(self,
                  dataBunch,
-                 lossFunction,
                  trainingSubscriber: TrainingSubscriber,
                  validationSubscriber: ValidationSubscriber):
         self._dataBunch = dataBunch
-        self._lossFunction = lossFunction
         self._trainingSubscriber = trainingSubscriber
         self._validationSubscriber = validationSubscriber
 
@@ -110,10 +140,9 @@ class TeacherEnhanced:
                      dataLoader,
                      epoch,
                      dataProcessingSubscriber: Subscriber):
-        dataProcessingSubscriber.preEpoch(epoch)
+        dataProcessingSubscriber.preEpoch(epoch, dataLoader)
         for _xDataBatch, _yDataBatch in dataLoader:
             dataProcessingSubscriber.preBatchEvaluation()
             _predictions = model(_xDataBatch)
-            calculatedLoss = self._lossFunction(_predictions, _yDataBatch)
-            dataProcessingSubscriber.postBatchEvaluation(calculatedLoss)
+            dataProcessingSubscriber.postBatchEvaluation(_predictions, _yDataBatch)
         dataProcessingSubscriber.postEpoch(epoch)
