@@ -39,6 +39,7 @@ class StatisticsSubscriber(Subscriber):
     def preEpoch(self, epoch, dataLoader):
         super().preEpoch(epoch, dataLoader)
         self._numberOfBatches = len(dataLoader)
+        self._epochAccuracy, self._epochLoss = 0., 0.
 
     def postBatchEvaluation(self, predictions, validationData):
         super().postBatchEvaluation(predictions, validationData)
@@ -139,10 +140,10 @@ class TeacherEnhanced:
                      model,
                      dataLoader,
                      epoch,
-                     dataProcessingSubscriber: Subscriber):
-        dataProcessingSubscriber.preEpoch(epoch, dataLoader)
+                     processingSubscriber: Subscriber):
+        processingSubscriber.preEpoch(epoch, dataLoader)
         for _xDataBatch, _yDataBatch in dataLoader:
-            dataProcessingSubscriber.preBatchEvaluation()
+            processingSubscriber.preBatchEvaluation()
             _predictions = model(_xDataBatch)
-            dataProcessingSubscriber.postBatchEvaluation(_predictions, _yDataBatch)
-        dataProcessingSubscriber.postEpoch(epoch)
+            processingSubscriber.postBatchEvaluation(_predictions, _yDataBatch)
+        processingSubscriber.postEpoch(epoch)
