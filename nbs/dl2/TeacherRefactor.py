@@ -56,7 +56,41 @@ class StatisticsSubscriber(Subscriber):
                                                          self._epochAccuracy / self._numberOfBatches))
 
 
-class TrainingSubscriber(StatisticsSubscriber):
+class ModelHook:
+    def __init__(self, model, callback) -> None:
+        super().__init__()
+        self._registeredHook = model.register_forward_hook(callback)
+
+    def remove(self): self._registeredHook.remove()
+
+    def __del__(self): self.remove()
+
+
+class HookedSubscriber(Subscriber):
+    def __init__(self):
+        super().__init__()
+        self._initializeStorage()
+        self._modelHook = None
+
+    def _initializeStorage(self):
+        self._aggregatedStandardDeviations = []
+        self._aggregatedMeans = []
+
+    def preModelTeach(self, model, epochs):
+        super().preModelTeach(model, epochs)
+        self._initializeStorage()
+        self._modelHook = ModelHook(model, self._appendStats)
+
+    def _appendStats(self, module, input, output):
+        self._aggregatedMeans.append(output.data.mean())
+        self._aggregatedStandardDeviations.append(output.data.std())
+
+    def postModelTeach(self):
+        super().postModelTeach()
+        del self._modelHook
+
+
+class TrainingSubscriber(StatisticsSubscriber, HookedSubscriber):
 
     def __init__(self,
                  lossFunction=Functional.cross_entropy,
