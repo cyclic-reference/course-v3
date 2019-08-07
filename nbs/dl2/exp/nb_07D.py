@@ -42,16 +42,34 @@ class StatisticsSubscriber(Subscriber):
         self._epochAccuracy = 0.
         self._epochLoss = 0.
         self._numberOfBatches = 0
+        self._batchSize = 1.
+        self._totalBatchesPerEpoch = 1.
+        self._currentBatch = 1.
+        self._totalTrainingBatches = -1
+
         self._accuracyFunction = accuracyFunction
         self._name = name
 
-    def preEpoch(self, epoch, dataLoader):
+    def preModelTeach(self, model, epochs):
+        super().preModelTeach(model, epochs)
+        self._totalTrainingBatches = -1
+
+    def preEpoch(self, epoch, dataLoader: DataLoader):
         super().preEpoch(epoch, dataLoader)
         self._numberOfBatches = len(dataLoader)
-        self._epochAccuracy, self._epochLoss = 0., 0.
+        self._epochAccuracy, self._epochLoss, self._currentBatch = 0., 0., 0.
+        self._batchSize = dataLoader.batch_size
+        self._totalBatchesPerEpoch = self._numberOfBatches
+        if self._totalTrainingBatches < 1:
+            self._totalTrainingBatches = self._totalEpochs * self._totalBatchesPerEpoch
+
+    def calculateCurrentProgress(self):
+        return ((self._currentBatch + self._totalBatchesPerEpoch * self._currentEpoch) /
+                self._totalTrainingBatches) - 1e-6
 
     def postBatchEvaluation(self, predictions, validationData):
         super().postBatchEvaluation(predictions, validationData)
+        self._currentBatch += 1
         self._epochAccuracy += self._accuracyFunction(predictions, validationData)
 
     def postBatchLossConsumption(self, loss):
