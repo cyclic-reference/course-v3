@@ -16,9 +16,9 @@ def test_eq(a,b): test(a,b,operator.eq,'==')
 from pathlib import Path
 from IPython.core.debugger import set_trace
 from fastai import datasets
-import pickle, gzip, math, torch, matplotlib as mathPlotLib
 import matplotlib.pyplot as plotter
 from torch import tensor
+import pickle, gzip, math, torch, matplotlib as mathPlotLib
 
 MNIST_URL='http://deeplearning.net/data/mnist/mnist.pkl'
 
